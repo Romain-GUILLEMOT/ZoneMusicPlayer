@@ -17,6 +17,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.io.*;
 import java.util.*;
@@ -51,7 +52,8 @@ public class MusicManager implements Listener {
                 String name = musicJson.get("name").getAsString();
                 int duration = musicJson.get("duration").getAsInt();
                 String regionId = musicJson.has("region_id") ? musicJson.get("region_id").getAsString() : null;
-                musics.add(new Music(name, duration, regionId));
+                String biome = musicJson.has("biome") ? musicJson.get("biome").getAsString() : null;
+                musics.add(new Music(name, duration, regionId, biome));
             });
             plugin.getLogger().info("Configuration loaded successfully.");
         } catch (Exception e) {
@@ -61,27 +63,34 @@ public class MusicManager implements Listener {
 
     private void saveDefaultConfig(File configFile) {
         try {
+            // Crée le dossier du plugin s'il n'existe pas
             if (!plugin.getDataFolder().exists()) {
                 plugin.getDataFolder().mkdirs();
             }
 
+            // Génère la configuration par défaut
             JsonObject defaultConfig = new JsonObject();
             defaultConfig.addProperty("min_delay", 5);
             defaultConfig.addProperty("max_delay", 20);
+
+            // Exemple de musiques
             JsonArray defaultMusics = new JsonArray();
-            defaultMusics.add(new Music("custom:pnj.intro.music", 120, "spawn").toJson());
-            defaultMusics.add(new Music("custom:background.music", 150, null).toJson());
+            defaultMusics.add(new Music("custom:pnj.intro.music", 120, "spawn", null).toJson()); // Musique associée à une région
+            defaultMusics.add(new Music("custom:forest_theme", 100, null, "FOREST").toJson()); // Musique associée à un biome
+            defaultMusics.add(new Music("custom:background.music", 150, null, null).toJson()); // Musique globale
             defaultConfig.add("musics", defaultMusics);
 
+            // Écriture dans le fichier de configuration
             try (Writer writer = new FileWriter(configFile)) {
                 Gson gson = new GsonBuilder().setPrettyPrinting().create();
                 gson.toJson(defaultConfig, writer);
             }
+
+            plugin.getLogger().info("Default configuration file created successfully.");
         } catch (IOException e) {
             plugin.getLogger().severe("Error creating default configuration file: " + e.getMessage());
         }
     }
-
     public void stopAllMusic() {
         activePlayers.forEach((player, taskId) -> Bukkit.getScheduler().cancelTask(taskId));
         activePlayers.clear();
@@ -123,68 +132,106 @@ public class MusicManager implements Listener {
         stopMusicForPlayer(event.getPlayer());
     }
 
-    private void handlePlayerMusic(Player player) {
-        // Identifier la région actuelle du joueur
-        String regionId = getCurrentRegion(player);
-        player.sendMessage("===============");
-
-        // Vérifier si le joueur est dans la même région qu'avant
-        player.sendMessage("DEBUG 1:" + currentMusic);
-        if (currentMusic.containsKey(player)) {
-            String currentRegion = currentMusic.get(player);
-            player.sendMessage("DEBUG 2:" + currentMusic.get(player));
-            player.sendMessage("DEBUG 3:" + regionId);
-            player.sendMessage("DEBUG 4:" + Objects.equals(currentRegion, regionId));
-            if (Objects.equals(currentRegion, regionId)) {
-                return; // Ne rien faire si le joueur est toujours dans la même région
-            }
+    private void cancelPlayerTask(Player player) {
+        Integer taskId = activePlayers.remove(player);
+        if (taskId != null) {
+            Bukkit.getScheduler().cancelTask(taskId);
         }
-        player.sendMessage("DEBUG 5: WTF");
+    }
+    private void handlePlayerMusic(Player player) {
+        // Identifier la région actuelle et le biome
+        String regionId = getCurrentRegion(player);
+        String biome = player.getLocation().getBlock().getBiome().toString();
 
-        // Arrêter la musique actuelle si le joueur change de région
+        // Vérification du contexte actuel (région ou biome ou global)
+        String currentContext = currentMusic.get(player);
+        String newContext = (regionId != null) ? "REGION:" + regionId : (biome != null ? "BIOME:" + biome : "GLOBAL");
+
+        if (Objects.equals(currentContext, newContext)) {
+            // Le joueur est déjà dans le même contexte
+
+            return;
+        }
+
+        // Arrêter la musique actuelle si le joueur change de contexte
         stopMusicForPlayer(player);
 
-        // Trouver une musique associée à la région actuelle
-        Optional<Music> optionalMusic = musics.stream()
-                .filter(music -> Objects.equals(music.getRegionId(), regionId))
-                .findAny();
+        // Étape 1 : Priorité à la région
+        if (regionId != null) {
+            List<Music> regionMusics = musics.stream()
+                    .filter(music -> Objects.equals(music.getRegionId(), regionId))
+                    .toList();
 
-        if (optionalMusic.isPresent()) {
-            // Jouer la musique de la nouvelle région
-            Music music = optionalMusic.get();
-            playMusic(player, music);
-            if (debugPlayers.contains(player)) {
-                player.sendMessage("Playing region music: " + music.getName() + " in region: " + regionId);
+            if (!regionMusics.isEmpty()) {
+                Music randomMusic = regionMusics.get(new Random().nextInt(regionMusics.size())); // Choix aléatoire
+                currentMusic.put(player, "REGION:" + regionId);
+                playMusic(player, randomMusic);
+                if (debugPlayers.contains(player)) {
+                    player.sendMessage("DEBUG: New context: Region " + regionId);
+                }
+                return;
             }
-        } else {
-            // Si aucune musique régionale n'est définie, jouer une musique globale (si applicable)
-            musics.stream()
-                    .filter(music -> music.getRegionId() == null)
-                    .findAny()
-                    .ifPresent(music -> {
-                        playMusic(player, music);
-                        if (debugPlayers.contains(player)) {
-                            player.sendMessage("Playing global music: " + music.getName());
-                        }
-                    });
+        }
+
+        // Étape 2 : Vérification du biome
+        List<Music> biomeMusics = musics.stream()
+                .filter(music -> Objects.equals(music.getBiome(), biome))
+                .toList();
+
+        if (!biomeMusics.isEmpty()) {
+            Music randomMusic = biomeMusics.get(new Random().nextInt(biomeMusics.size())); // Choix aléatoire
+            currentMusic.put(player, "BIOME:" + biome);
+            playMusic(player, randomMusic);
+            if (debugPlayers.contains(player)) {
+                player.sendMessage("DEBUG: New context: Biome " + biome);
+            }
+            return;
+        }
+
+        // Étape 3 : Musique globale
+        List<Music> globalMusics = musics.stream()
+                .filter(music -> music.getRegionId() == null && music.getBiome() == null)
+                .toList();
+
+        if (!globalMusics.isEmpty()) {
+            Music randomMusic = globalMusics.get(new Random().nextInt(globalMusics.size())); // Choix aléatoire
+            currentMusic.put(player, "GLOBAL");
+            playMusic(player, randomMusic);
+            if (debugPlayers.contains(player)) {
+                player.sendMessage("DEBUG: New context: Global");
+            }
         }
     }
 
     private void playMusic(Player player, Music music) {
-        plugin.getLogger().info("Scheduling music: " + music.getName() + " for player: " + player.getName());
+        // Annuler toute tâche en cours pour ce joueur
+        cancelPlayerTask(player);
 
-        // Enregistre la musique actuelle avant de la jouer
-        currentMusic.put(player, music.getRegionId());
+        plugin.getLogger().info("Playing music: " + music.getName() + " for player: " + player.getName());
 
-        // Planifie la musique après un délai aléatoire
-        int taskId = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            plugin.getLogger().info("Playing sound: " + music.getName() + " for player: " + player.getName());
+        // Planifie la musique
+        BukkitTask task = Bukkit.getScheduler().runTaskLater(plugin, () -> {
             player.playSound(player.getLocation(), music.getName(), SoundCategory.MUSIC, 1.0f, 1.0f);
+            if (debugPlayers.contains(player)) {
+                player.sendMessage("Playing sound: " + music.getName());
+            }
 
-            // Relance la musique après sa durée
-            Bukkit.getScheduler().runTaskLater(plugin, () -> playMusic(player, music), music.getDuration() * 20L);
-        }, getRandomDelay() * 20L).getTaskId();
+            // Relance une nouvelle musique aléatoire dans le même contexte
+            List<Music> musicPool = musics.stream()
+                    .filter(m -> Objects.equals(m.getRegionId(), music.getRegionId())
+                            || Objects.equals(m.getBiome(), music.getBiome())
+                            || (m.getRegionId() == null && m.getBiome() == null))
+                    .toList();
 
+            if (!musicPool.isEmpty()) {
+                Music nextMusic = musicPool.get(new Random().nextInt(musicPool.size()));
+                playMusic(player, nextMusic);
+            }
+        }, (music.getDuration() + getRandomDelay()) * 20L);
+
+// Récupérer l'ID de la tâche
+        int taskId = task.getTaskId();
+        // Associe la tâche au joueur
         activePlayers.put(player, taskId);
     }
 
@@ -193,13 +240,9 @@ public class MusicManager implements Listener {
         if (taskId != null) {
             Bukkit.getScheduler().cancelTask(taskId);
         }
-
         musics.forEach(music -> player.stopSound(music.getName(), SoundCategory.MUSIC));
-        if (currentMusic.containsKey(player)) {
-            currentMusic.remove(player);
-        }
+        currentMusic.remove(player);
     }
-
     private String getCurrentRegion(Player player) {
         BukkitRegionContainer container = (BukkitRegionContainer) WorldGuard.getInstance().getPlatform().getRegionContainer();
         RegionManager regionManager = container.get(BukkitAdapter.adapt(player.getWorld()));

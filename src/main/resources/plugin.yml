@@ -8,14 +8,22 @@ api-version: '1.20.6'
 
 commands:
   zonemusic:
-    description: Manage ZoneMusicPlayer.
+    description: Manage ZoneMusicPlayer settings and play sounds.
+    usage: /zonemusic <reload|debug|play>
     aliases: [zm]
+    permission: zonemusic.use
 permissions:
+  zonemusic.use:
+    description: Allows access to ZoneMusicPlayer commands.
+    default: true
   zonemusic.reload:
     description: Allows reloading the plugin configuration.
     default: op
   zonemusic.debug:
-    description: Allows toggling debug mode for the player.
+    description: Allows toggling debug mode.
+    default: op
+  zonemusic.play:
+    description: Allows playing custom sounds for players.
     default: op
 
 depend:
