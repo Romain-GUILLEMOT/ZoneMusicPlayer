@@ -165,7 +165,7 @@ public class MusicManager implements Listener {
             if (!regionMusics.isEmpty()) {
                 Music randomMusic = regionMusics.get(new Random().nextInt(regionMusics.size())); // Choix aléatoire
                 currentMusic.put(player, "REGION:" + regionId);
-                playMusic(player, randomMusic);
+                playMusic(player, randomMusic, false);
                 if (debugPlayers.contains(player)) {
                     player.sendMessage("DEBUG: New context: Region " + regionId);
                 }
@@ -181,7 +181,7 @@ public class MusicManager implements Listener {
         if (!biomeMusics.isEmpty()) {
             Music randomMusic = biomeMusics.get(new Random().nextInt(biomeMusics.size())); // Choix aléatoire
             currentMusic.put(player, "BIOME:" + biome);
-            playMusic(player, randomMusic);
+            playMusic(player, randomMusic, false);
             if (debugPlayers.contains(player)) {
                 player.sendMessage("DEBUG: New context: Biome " + biome);
             }
@@ -196,22 +196,25 @@ public class MusicManager implements Listener {
         if (!globalMusics.isEmpty()) {
             Music randomMusic = globalMusics.get(new Random().nextInt(globalMusics.size())); // Choix aléatoire
             currentMusic.put(player, "GLOBAL");
-            playMusic(player, randomMusic);
+            playMusic(player, randomMusic, false);
             if (debugPlayers.contains(player)) {
                 player.sendMessage("DEBUG: New context: Global");
             }
         }
     }
 
-    private void playMusic(Player player, Music music) {
+    private void playMusic(Player player, Music music, boolean notFirst) {
         // Annuler toute tâche en cours pour ce joueur
         cancelPlayerTask(player);
-
-        plugin.getLogger().info("Playing music: " + music.getName() + " for player: " + player.getName());
-
+        var time = getRandomDelay();
+        time += notFirst ? music.getDuration() : 0;
+        if (debugPlayers.contains(player)) {
+            player.sendMessage("Schedule music: " + music.getName() + " for player: " + player.getName() + " in "+ time + "s");
+        }
         // Planifie la musique
+
         BukkitTask task = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            player.playSound(player.getLocation(), music.getName(), SoundCategory.MUSIC, 1.0f, 1.0f);
+            player.playSound(player.getLocation(), music.getName(), SoundCategory.AMBIENT, 1.0f, 1.0f);
             if (debugPlayers.contains(player)) {
                 player.sendMessage("Playing sound: " + music.getName());
             }
@@ -225,9 +228,9 @@ public class MusicManager implements Listener {
 
             if (!musicPool.isEmpty()) {
                 Music nextMusic = musicPool.get(new Random().nextInt(musicPool.size()));
-                playMusic(player, nextMusic);
+                playMusic(player, nextMusic, true);
             }
-        }, (music.getDuration() + getRandomDelay()) * 20L);
+        }, (time * 20L));
 
 // Récupérer l'ID de la tâche
         int taskId = task.getTaskId();
@@ -240,7 +243,7 @@ public class MusicManager implements Listener {
         if (taskId != null) {
             Bukkit.getScheduler().cancelTask(taskId);
         }
-        musics.forEach(music -> player.stopSound(music.getName(), SoundCategory.MUSIC));
+        musics.forEach(music -> player.stopSound(music.getName(), SoundCategory.AMBIENT));
         currentMusic.remove(player);
     }
     private String getCurrentRegion(Player player) {
