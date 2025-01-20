@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="ZoneMusicPlayer:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/ZoneMusicPlayer_jar</output-path>
+    <root id="archive" name="ZoneMusicPlayer.jar">
+      <element id="module-output" name="ZoneMusicPlayer" />
+    </root>
+  </artifact>
+</component>

@@ -1,0 +1,22 @@
+name: ZoneMusicPlayer
+version: 1.0.0
+main: fr.yotapaki.ZoneMusicPlayer.Main
+description: An example plugin
+author: Yotapaki
+website: https://romain-guillemot.dev
+api-version: '1.20.6'
+
+commands:
+  zonemusic:
+    description: Manage ZoneMusicPlayer.
+    aliases: [zm]
+permissions:
+  zonemusic.reload:
+    description: Allows reloading the plugin configuration.
+    default: op
+  zonemusic.debug:
+    description: Allows toggling debug mode for the player.
+    default: op
+
+depend:
+  - WorldGuard
