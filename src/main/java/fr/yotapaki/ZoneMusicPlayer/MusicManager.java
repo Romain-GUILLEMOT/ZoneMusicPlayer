@@ -27,6 +27,7 @@ public class MusicManager implements Listener {
     private final Main plugin;
     private final Map<Player, Integer> activePlayers = new HashMap<>();
     private final Map<Player, String> currentMusic = new HashMap<>();
+    private final Map<String, Set<String>> biomeGroups = new HashMap<>();
     private final List<Music> musics = new ArrayList<>();
     private final Set<Player> debugPlayers = new HashSet<>();
     private int minDelay = 5;
@@ -35,6 +36,7 @@ public class MusicManager implements Listener {
     public MusicManager(Main plugin) {
         this.plugin = plugin;
     }
+
 
     public void loadConfig() {
         File configFile = new File(plugin.getDataFolder(), "config.json");
@@ -46,41 +48,58 @@ public class MusicManager implements Listener {
             JsonObject config = JsonParser.parseReader(new FileReader(configFile)).getAsJsonObject();
             minDelay = config.get("min_delay").getAsInt();
             maxDelay = config.get("max_delay").getAsInt();
+
+            // Charger les groupes de biomes
+            biomeGroups.clear();
+            JsonObject biomeGroupsJson = config.getAsJsonObject("biome_groups");
+            for (String group : biomeGroupsJson.keySet()) {
+                JsonArray biomes = biomeGroupsJson.getAsJsonArray(group);
+                Set<String> biomeSet = new HashSet<>();
+                for (JsonElement biome : biomes) {
+                    biomeSet.add(biome.getAsString());
+                }
+                biomeGroups.put(group, biomeSet);
+            }
+
+            // Charger les musiques
             musics.clear();
             config.getAsJsonArray("musics").forEach(jsonElement -> {
                 JsonObject musicJson = jsonElement.getAsJsonObject();
                 String name = musicJson.get("name").getAsString();
                 int duration = musicJson.get("duration").getAsInt();
                 String regionId = musicJson.has("region_id") ? musicJson.get("region_id").getAsString() : null;
-                String biome = musicJson.has("biome") ? musicJson.get("biome").getAsString() : null;
-                musics.add(new Music(name, duration, regionId, biome));
+                String biomeGroup = musicJson.has("biome_group") ? musicJson.get("biome_group").getAsString() : null;
+                musics.add(new Music(name, duration, regionId, biomeGroup));
             });
             plugin.getLogger().info("Configuration loaded successfully.");
         } catch (Exception e) {
             plugin.getLogger().severe("Failed to load configuration: " + e.getMessage());
         }
     }
-
     private void saveDefaultConfig(File configFile) {
         try {
-            // Crée le dossier du plugin s'il n'existe pas
             if (!plugin.getDataFolder().exists()) {
                 plugin.getDataFolder().mkdirs();
             }
 
-            // Génère la configuration par défaut
             JsonObject defaultConfig = new JsonObject();
             defaultConfig.addProperty("min_delay", 5);
             defaultConfig.addProperty("max_delay", 20);
 
-            // Exemple de musiques
+            // Ajouter les groupes de biomes
+            JsonObject biomeGroups = new JsonObject();
+            biomeGroups.add("FOREST_GROUP", new Gson().toJsonTree(List.of("FOREST", "TAIGA", "DARK_FOREST")));
+            biomeGroups.add("DESERT_GROUP", new Gson().toJsonTree(List.of("DESERT", "BADLANDS")));
+            defaultConfig.add("biome_groups", biomeGroups);
+
+            // Ajouter les musiques
             JsonArray defaultMusics = new JsonArray();
-            defaultMusics.add(new Music("custom:pnj.intro.music", 120, "spawn", null).toJson()); // Musique associée à une région
-            defaultMusics.add(new Music("custom:forest_theme", 100, null, "FOREST").toJson()); // Musique associée à un biome
-            defaultMusics.add(new Music("custom:background.music", 150, null, null).toJson()); // Musique globale
+            defaultMusics.add(new Music("custom:region_spawn_music", 120, "spawn", null).toJson()); // Région
+            defaultMusics.add(new Music("custom:forest_theme", 100, null, "FOREST").toJson()); // Biome seul
+            defaultMusics.add(new Music("custom:desert_theme", 120, null, "DESERT_GROUP").toJson()); // Groupe de biomes
+            defaultMusics.add(new Music("custom:global_theme", 150, null, null).toJson()); // Musique globale
             defaultConfig.add("musics", defaultMusics);
 
-            // Écriture dans le fichier de configuration
             try (Writer writer = new FileWriter(configFile)) {
                 Gson gson = new GsonBuilder().setPrettyPrinting().create();
                 gson.toJson(defaultConfig, writer);
@@ -139,68 +158,95 @@ public class MusicManager implements Listener {
         }
     }
     private void handlePlayerMusic(Player player) {
-        // Identifier la région actuelle et le biome
         String regionId = getCurrentRegion(player);
         String biome = player.getLocation().getBlock().getBiome().toString();
 
-        // Vérification du contexte actuel (région ou biome ou global)
+        // Identifier le groupe de biomes correspondant
+        String biomeGroup = biomeGroups.entrySet().stream()
+                .filter(entry -> entry.getValue().contains(biome))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(null);
+
+        // Définir le nouveau contexte
         String currentContext = currentMusic.get(player);
-        String newContext = (regionId != null) ? "REGION:" + regionId : (biome != null ? "BIOME:" + biome : "GLOBAL");
-
-        if (Objects.equals(currentContext, newContext)) {
-            // Le joueur est déjà dans le même contexte
-
-            return;
-        }
-
-        // Arrêter la musique actuelle si le joueur change de contexte
-        stopMusicForPlayer(player);
-
-        // Étape 1 : Priorité à la région
-        if (regionId != null) {
-            List<Music> regionMusics = musics.stream()
-                    .filter(music -> Objects.equals(music.getRegionId(), regionId))
-                    .toList();
-
-            if (!regionMusics.isEmpty()) {
-                Music randomMusic = regionMusics.get(new Random().nextInt(regionMusics.size())); // Choix aléatoire
-                currentMusic.put(player, "REGION:" + regionId);
-                playMusic(player, randomMusic, false);
-                if (debugPlayers.contains(player)) {
-                    player.sendMessage("DEBUG: New context: Region " + regionId);
+        if(regionId != null) {
+            List<Music> filteredMusicsRegion = musics.stream().filter(music -> Objects.equals(music.getRegionId(), regionId)).toList();
+            if(!filteredMusicsRegion.isEmpty()) {
+                String newContext =  "REGION:" + regionId;
+                if (Objects.equals(currentContext, newContext)) {
+                    return;
                 }
+                if (debugPlayers.contains(player)) {
+                    player.sendMessage("DEBUG: Attempting to play region music for region: " + regionId);
+                }
+                stopMusicForPlayer(player);
+                playMusicForContext(player, "REGION:" + regionId, filteredMusicsRegion);
                 return;
             }
         }
+        if (biome != null && biomeMusicsExist(biome)) {
+            List<Music> filteredMusicsBiome = musics.stream().filter(music -> Objects.equals(music.getBiome(), biome)).toList();
+            if(!filteredMusicsBiome.isEmpty()) {
+                String newContext = "BIOME:" + biome;
+                if (Objects.equals(currentContext, newContext)) {
+                    return;
+                }
+                if (debugPlayers.contains(player)) {
+                    player.sendMessage("DEBUG: Attempting to play music for biome: " + biome);
+                }
+                stopMusicForPlayer(player);
+                playMusicForContext(player, "BIOME:" + biome, filteredMusicsBiome);
+                return;
+            }
+        }
+        if (biomeGroup != null) {
+            List<Music> filteredMusicsBiomeGroup = musics.stream().filter(music -> Objects.equals(music.getBiome(), biomeGroup)).toList();
+            if(!filteredMusicsBiomeGroup.isEmpty()) {
+                String newContext = "BIOME_GROUP:" + biomeGroup;
+                if (Objects.equals(currentContext, newContext)) {
+                    return;
+                }
+                if (debugPlayers.contains(player)) {
+                    player.sendMessage("DEBUG: Attempting to play music for biome group: " + biomeGroup);
+                }
+                stopMusicForPlayer(player);
+                playMusicForContext(player, "BIOME_GROUP:" + biomeGroup,filteredMusicsBiomeGroup);
+                return;
+            }
 
-        // Étape 2 : Vérification du biome
-        List<Music> biomeMusics = musics.stream()
-                .filter(music -> Objects.equals(music.getBiome(), biome))
-                .toList();
+        }
+        String newContext = "GLOBAL";
+        if (Objects.equals(currentContext, newContext)) {
+            return;
+        }
+        stopMusicForPlayer(player);
 
-        if (!biomeMusics.isEmpty()) {
-            Music randomMusic = biomeMusics.get(new Random().nextInt(biomeMusics.size())); // Choix aléatoire
-            currentMusic.put(player, "BIOME:" + biome);
-            playMusic(player, randomMusic, false);
+        List<Music> filteredMusics = musics.stream().filter(music -> music.getRegionId() == null && music.getBiome() == null).toList();
+
+        if (debugPlayers.contains(player)) {
+            player.sendMessage("DEBUG: Attempting to play global music.");
+        }
+        playMusicForContext(player, "GLOBAL", filteredMusics);
+    }
+
+    private boolean biomeMusicsExist(String biome) {
+        return musics.stream().anyMatch(music -> Objects.equals(music.getBiome(), biome));
+    }
+
+    private void playMusicForContext(Player player, String context,  List<Music>  filteredMusics) {
+
+        if (filteredMusics.isEmpty()) {
             if (debugPlayers.contains(player)) {
-                player.sendMessage("DEBUG: New context: Biome " + biome);
+                player.sendMessage("DEBUG: No music available for context: " + context);
             }
             return;
         }
 
-        // Étape 3 : Musique globale
-        List<Music> globalMusics = musics.stream()
-                .filter(music -> music.getRegionId() == null && music.getBiome() == null)
-                .toList();
+        Music randomMusic = filteredMusics.get(new Random().nextInt(filteredMusics.size()));
+        currentMusic.put(player, context);
 
-        if (!globalMusics.isEmpty()) {
-            Music randomMusic = globalMusics.get(new Random().nextInt(globalMusics.size())); // Choix aléatoire
-            currentMusic.put(player, "GLOBAL");
-            playMusic(player, randomMusic, false);
-            if (debugPlayers.contains(player)) {
-                player.sendMessage("DEBUG: New context: Global");
-            }
-        }
+        playMusic(player, randomMusic, false);
     }
 
     private void playMusic(Player player, Music music, boolean notFirst) {
