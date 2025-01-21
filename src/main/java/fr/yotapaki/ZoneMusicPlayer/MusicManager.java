@@ -246,10 +246,10 @@ public class MusicManager implements Listener {
         Music randomMusic = filteredMusics.get(new Random().nextInt(filteredMusics.size()));
         currentMusic.put(player, context);
 
-        playMusic(player, randomMusic, false);
+        playMusic(player, randomMusic, false, filteredMusics);
     }
 
-    private void playMusic(Player player, Music music, boolean notFirst) {
+    private void playMusic(Player player, Music music, boolean notFirst, List<Music>  filteredMusics) {
         // Annuler toute tâche en cours pour ce joueur
         cancelPlayerTask(player);
         var time = getRandomDelay();
@@ -265,16 +265,9 @@ public class MusicManager implements Listener {
                 player.sendMessage("Playing sound: " + music.getName());
             }
 
-            // Relance une nouvelle musique aléatoire dans le même contexte
-            List<Music> musicPool = musics.stream()
-                    .filter(m -> Objects.equals(m.getRegionId(), music.getRegionId())
-                            || Objects.equals(m.getBiome(), music.getBiome())
-                            || (m.getRegionId() == null && m.getBiome() == null))
-                    .toList();
-
-            if (!musicPool.isEmpty()) {
-                Music nextMusic = musicPool.get(new Random().nextInt(musicPool.size()));
-                playMusic(player, nextMusic, true);
+            if (!filteredMusics.isEmpty()) {
+                Music nextMusic = filteredMusics.get(new Random().nextInt(filteredMusics.size()));
+                playMusic(player, nextMusic, true, filteredMusics);
             }
         }, (time * 20L));
 
